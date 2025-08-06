@@ -74,4 +74,17 @@ else
 fi
 
 echo "Starting DataForge server..."
+
+# Test that the app can import correctly before starting
+echo "Testing app import..."
+python3 -c "
+try:
+    from app.main import app
+    print('✅ App import successful')
+except Exception as e:
+    print(f'❌ App import failed: {e}')
+    exit(1)
+"
+
+echo "Starting uvicorn server on 0.0.0.0:8000..."
 uvicorn app.main:app --host 0.0.0.0 --port 8000

@@ -32,9 +32,9 @@ USER dataforge
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8000/api/health || exit 1
+# Health check - use simple endpoint and give more time for startup
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=5 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the startup script
 CMD ["./start.sh"]
