@@ -44,24 +44,33 @@ else:
 
 # Start Celery worker in background
 echo "Starting Celery worker..."
+
+# Try to start Celery and capture any immediate errors
 celery -A app.celery_app worker \
     --loglevel=info \
     --concurrency=2 \
     --queues=generation,augmentation,maintenance,default \
     --detach \
     --pidfile=/tmp/celery.pid \
-    --logfile=/tmp/celery.log
+    --logfile=/tmp/celery.log 2>&1
 
 # Give Celery a moment to start
-sleep 3
+sleep 5
 
-# Verify Celery worker is running
-if [ -f /tmp/celery.pid ]; then
-    echo "Celery worker started successfully"
+# Check if Celery worker started successfully
+if [ -f /tmp/celery.pid ] && kill -0 `cat /tmp/celery.pid` 2>/dev/null; then
+    echo "✅ Celery worker started successfully (PID: $(cat /tmp/celery.pid))"
 else
-    echo "Failed to start Celery worker"
-    cat /tmp/celery.log || echo "No Celery log available"
-    exit 1
+    echo "❌ Failed to start Celery worker"
+    echo "=== Celery Error Log ==="
+    cat /tmp/celery.log 2>/dev/null || echo "No Celery log available"
+    echo "========================"
+    
+    # Try a simpler Celery command to diagnose the issue
+    echo "Testing basic Celery connectivity..."
+    celery -A app.celery_app inspect ping --timeout=10 2>&1 || echo "Celery ping failed"
+    
+    echo "⚠️  Continuing without Celery worker - web server will start but background jobs won't work"
 fi
 
 echo "Starting DataForge server..."

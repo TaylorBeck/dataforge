@@ -96,7 +96,7 @@ class JobStatusResponse(BaseModel):
 class HealthCheckResponse(BaseModel):
     """Health check response model."""
     
-    status: Literal['healthy', 'unhealthy'] = Field(..., description="Service health status")
+    status: Literal['healthy', 'degraded', 'unhealthy'] = Field(..., description="Service health status")
     timestamp: datetime = Field(..., description="Health check timestamp")
     redis_connected: bool = Field(..., description="Redis connection status")
     version: str = Field(..., description="API version")
