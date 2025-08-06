@@ -22,8 +22,11 @@ COPY . .
 COPY start.sh .
 RUN chmod +x start.sh
 
-# Create non-root user
-RUN useradd -m -u 1000 dataforge && chown -R dataforge:dataforge /app
+# Create non-root user and set permissions
+RUN useradd -m -u 1000 dataforge && \
+    chown -R dataforge:dataforge /app && \
+    mkdir -p /tmp && \
+    chown dataforge:dataforge /tmp
 USER dataforge
 
 # Expose port
