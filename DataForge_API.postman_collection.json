@@ -1,0 +1,513 @@
+{
+	"info": {
+		"_postman_id": "12345678-1234-5678-9012-123456789012",
+		"name": "DataForge API",
+		"description": "Collection for testing the DataForge synthetic text generation API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "12345678"
+	},
+	"item": [
+		{
+			"name": "Health & Status",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"health"
+							]
+						},
+						"description": "Check the health status of the API and its dependencies (Redis, LLM services)"
+					},
+					"response": []
+				},
+				{
+					"name": "System Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"stats"
+							]
+						},
+						"description": "Get system statistics including active jobs, LLM provider info, and limits"
+					},
+					"response": []
+				},
+				{
+					"name": "Root Endpoint",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								""
+							]
+						},
+						"description": "Get basic API information and available endpoints"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for checking API health and status"
+		},
+		{
+			"name": "Text Generation",
+			"item": [
+				{
+					"name": "Generate Support Requests",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Store job_id for use in other requests",
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('job_id', response.job_id);",
+									"    console.log('Job ID stored:', response.job_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"mobile banking app\",\n    \"count\": 3,\n    \"version\": \"v1\",\n    \"temperature\": 0.7\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/generate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"generate"
+							]
+						},
+						"description": "Generate synthetic support requests for a mobile banking app"
+					},
+					"response": []
+				},
+				{
+					"name": "Generate E-commerce Reviews",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Store job_id for e-commerce reviews",
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('ecommerce_job_id', response.job_id);",
+									"    console.log('E-commerce Job ID stored:', response.job_id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"wireless noise-canceling headphones\",\n    \"count\": 5,\n    \"version\": \"v1\",\n    \"temperature\": 0.8\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/generate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"generate"
+							]
+						},
+						"description": "Generate synthetic support requests for wireless headphones with higher creativity"
+					},
+					"response": []
+				},
+				{
+					"name": "Generate SaaS Software Issues",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"project management software\",\n    \"count\": 2,\n    \"version\": \"v1\",\n    \"temperature\": 0.5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/generate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"generate"
+							]
+						},
+						"description": "Generate synthetic support requests for SaaS software with lower temperature for more focused output"
+					},
+					"response": []
+				},
+				{
+					"name": "Large Batch Generation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"online learning platform\",\n    \"count\": 15,\n    \"version\": \"v1\",\n    \"temperature\": 0.7\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/generate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"generate"
+							]
+						},
+						"description": "Test larger batch generation to see progress tracking and concurrent processing"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for creating text generation jobs"
+		},
+		{
+			"name": "Job Management",
+			"item": [
+				{
+					"name": "Get Job Result (from variable)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/result/{{job_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"result",
+								"{{job_id}}"
+							]
+						},
+						"description": "Get the status and results of the job stored in the environment variable"
+					},
+					"response": []
+				},
+				{
+					"name": "Get E-commerce Job Result",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/result/{{ecommerce_job_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"result",
+								"{{ecommerce_job_id}}"
+							]
+						},
+						"description": "Get the status and results of the e-commerce job"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job Result (Manual ID)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/result/replace-with-actual-job-id",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"result",
+								"replace-with-actual-job-id"
+							]
+						},
+						"description": "Get job result by manually entering job ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Job",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/job/{{job_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"job",
+								"{{job_id}}"
+							]
+						},
+						"description": "Cancel a running or pending job"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Non-existent Job",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/result/non-existent-job-id",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"result",
+								"non-existent-job-id"
+							]
+						},
+						"description": "Test error handling for non-existent job IDs"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for managing and retrieving job results"
+		},
+		{
+			"name": "Validation & Testing",
+			"item": [
+				{
+					"name": "Validate Generation Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"smartphone camera app\",\n    \"count\": 10,\n    \"version\": \"v1\",\n    \"temperature\": 0.9\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/validate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"validate"
+							]
+						},
+						"description": "Validate a generation request without creating a job"
+					},
+					"response": []
+				},
+				{
+					"name": "Test LLM Connection",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/test-llm",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"test-llm"
+							]
+						},
+						"description": "Test the LLM connection and functionality"
+					},
+					"response": []
+				},
+				{
+					"name": "Invalid Request - Empty Product",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"\",\n    \"count\": 5\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/generate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"generate"
+							]
+						},
+						"description": "Test validation error handling with empty product"
+					},
+					"response": []
+				},
+				{
+					"name": "Invalid Request - Count Too High",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"test product\",\n    \"count\": 1000\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/generate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"generate"
+							]
+						},
+						"description": "Test validation error handling with excessive count"
+					},
+					"response": []
+				},
+				{
+					"name": "Invalid Request - Bad Temperature",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"product\": \"test product\",\n    \"count\": 3,\n    \"temperature\": 5.0\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/generate",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"generate"
+							]
+						},
+						"description": "Test validation error handling with invalid temperature"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for validation and error testing"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Set base URL if not already set",
+					"if (!pm.environment.get('base_url')) {",
+					"    pm.environment.set('base_url', 'http://localhost:8000');",
+					"}"
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					"// Global test script for all requests",
+					"pm.test('Response time is reasonable', function () {",
+					"    pm.expect(pm.response.responseTime).to.be.below(30000);",
+					"});",
+					"",
+					"pm.test('Response has proper headers', function () {",
+					"    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
+					"});"
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "job_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "ecommerce_job_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

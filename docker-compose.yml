@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  dataforge-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=false
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_LLM_PROVIDER=mock
+      # Add your API keys here or use .env file
+      # - OPENAI_API_KEY=your_key_here
+    depends_on:
+      - redis
+    volumes:
+      - ./app/templates:/app/app/templates
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  redis_data:
