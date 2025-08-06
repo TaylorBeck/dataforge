@@ -75,6 +75,26 @@ class Settings(BaseSettings):
         description="OpenAI API timeout"
     )
     
+    # Rate Limiting Configuration
+    openai_requests_per_minute: int = Field(
+        60,
+        ge=1,
+        le=10000,
+        description="OpenAI requests per minute limit"
+    )
+    openai_tokens_per_minute: int = Field(
+        40000,
+        ge=1000,
+        le=1000000,
+        description="OpenAI tokens per minute limit"
+    )
+    openai_max_concurrent_requests: int = Field(
+        10,
+        ge=1,
+        le=100,
+        description="Maximum concurrent OpenAI requests"
+    )
+    
     # Anthropic Configuration (for future use)
     anthropic_api_key: Optional[str] = Field(
         None,

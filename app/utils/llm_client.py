@@ -77,36 +77,70 @@ class OpenAIClient(LLMClientInterface):
         temperature: float = 0.7,
         max_tokens: Optional[int] = None
     ) -> str:
-        """Generate text using OpenAI API."""
+        """Generate text using OpenAI API with advanced rate limiting."""
+        settings = get_settings()
+        max_tokens = max_tokens or settings.openai_max_tokens
+        
+        # Import rate limiting inside function to avoid circular imports
         try:
-            settings = get_settings()
-            max_tokens = max_tokens or settings.openai_max_tokens
-            
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=self.timeout
-            )
-            
-            if not response.choices:
-                raise LLMException("No response choices returned from OpenAI")
-            
-            content = response.choices[0].message.content
-            if content is None:
-                raise LLMException("Empty content returned from OpenAI")
+            from app.services.rate_limiting_service import get_rate_limit_manager, RateLimitError
+            rate_limit_manager = get_rate_limit_manager()
+            use_rate_limiting = True
+        except ImportError:
+            logger.warning("Rate limiting service not available, proceeding without rate limiting")
+            use_rate_limiting = False
+        
+        # Estimate tokens for rate limiting (rough approximation)
+        estimated_tokens = len(prompt) // 4 + (max_tokens or 0)
+        
+        try:
+            if use_rate_limiting:
+                async with rate_limit_manager.rate_limited_request(estimated_tokens=estimated_tokens) as limiter:
+                    response = await self._make_openai_request(prompt, temperature, max_tokens)
+                    
+                    # Extract rate limit headers and update manager
+                    if hasattr(response, '_raw_response') and hasattr(response._raw_response, 'headers'):
+                        headers = dict(response._raw_response.headers)
+                        rate_limit_manager.update_rate_limits_from_headers(headers)
+                    
+                    return self._process_openai_response(response)
+            else:
+                response = await self._make_openai_request(prompt, temperature, max_tokens)
+                return self._process_openai_response(response)
                 
-            return content.strip()
-            
         except Exception as e:
+            if use_rate_limiting and "RateLimitError" in str(type(e)):
+                logger.error(f"Rate limit error: {e}")
+                raise LLMException(f"OpenAI rate limit exceeded: {e}")
+            
             logger.error(f"OpenAI generation failed: {e}")
-            if "rate limit" in str(e).lower():
+            if "rate limit" in str(e).lower() or "429" in str(e):
                 raise LLMException(f"OpenAI rate limit exceeded: {e}")
             elif "timeout" in str(e).lower():
                 raise LLMException(f"OpenAI request timeout: {e}")
             else:
                 raise LLMException(f"OpenAI generation failed: {e}")
+    
+    async def _make_openai_request(self, prompt: str, temperature: float, max_tokens: int):
+        """Make the actual OpenAI API request"""
+        return await self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=self.timeout
+        )
+    
+    def _process_openai_response(self, response):
+        """Process OpenAI API response"""
+        if not response.choices:
+            raise LLMException("No response choices returned from OpenAI")
+        
+        content = response.choices[0].message.content
+        if content is None:
+            raise LLMException("Empty content returned from OpenAI")
+            
+        return content.strip()
     
     async def get_model_info(self) -> Dict[str, Any]:
         """Get OpenAI model information."""

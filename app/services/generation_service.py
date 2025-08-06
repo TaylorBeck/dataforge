@@ -266,6 +266,90 @@ class GenerationService:
             results["valid"] = False
         
         return results
+    
+    async def generate_with_augmentation(self,
+                                       request: GenerationRequest,
+                                       augmentation_strategies: List[str] = None,
+                                       augment_ratio: float = 0.5) -> GenerationResponse:
+        """
+        Generate samples with optional data augmentation.
+        
+        Args:
+            request: Base generation request
+            augmentation_strategies: List of strategies to apply ('CDA', 'ADA', 'CADA')
+            augment_ratio: Ratio of augmented to original samples (0.0 to 1.0)
+            
+        Returns:
+            Generation response with original and augmented samples
+        """
+        try:
+            from app.services.data_augmentation_service import (
+                get_augmentation_service, AugmentationStrategy, AugmentationRequest
+            )
+            
+            # Generate original samples
+            base_response = await self.generate_batch(request)
+            samples = base_response.samples.copy()
+            
+            # Apply augmentation if requested
+            if augmentation_strategies and augment_ratio > 0:
+                augmentation_service = get_augmentation_service()
+                
+                # Calculate how many samples to augment
+                num_original = len(samples)
+                num_to_augment = min(num_original, max(1, int(num_original * augment_ratio)))
+                
+                # Select strategies
+                strategy_map = {
+                    'CDA': AugmentationStrategy.CDA,
+                    'ADA': AugmentationStrategy.ADA, 
+                    'CADA': AugmentationStrategy.CADA
+                }
+                
+                for strategy_name in augmentation_strategies:
+                    if strategy_name not in strategy_map:
+                        logger.warning(f"Unknown augmentation strategy: {strategy_name}")
+                        continue
+                    
+                    strategy = strategy_map[strategy_name]
+                    
+                    # Apply to selected samples
+                    for i in range(num_to_augment):
+                        if i < len(samples):
+                            original_sample = samples[i]
+                            
+                            try:
+                                augmented_samples = await augmentation_service.create_augmented_samples(
+                                    original_sample=original_sample,
+                                    strategy=strategy,
+                                    num_variants=2  # Generate 2 variants per strategy
+                                )
+                                
+                                samples.extend(augmented_samples)
+                                
+                            except Exception as e:
+                                logger.warning(f"Augmentation failed for sample {i} with {strategy_name}: {e}")
+                                continue
+            
+            # Create enhanced response
+            enhanced_response = GenerationResponse(samples=samples)
+            
+            logger.info(
+                f"Generation with augmentation completed: "
+                f"{len(base_response.samples)} original + "
+                f"{len(samples) - len(base_response.samples)} augmented = "
+                f"{len(samples)} total samples"
+            )
+            
+            return enhanced_response
+            
+        except ImportError:
+            logger.warning("Data augmentation service not available, returning base generation")
+            return await self.generate_batch(request)
+        except Exception as e:
+            logger.error(f"Enhanced generation failed: {e}")
+            # Fall back to basic generation
+            return await self.generate_batch(request)
 
 
 # Global generation service instance

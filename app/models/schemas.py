@@ -2,7 +2,7 @@
 Pydantic models for request/response schemas and data validation.
 """
 from datetime import datetime
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Any
 from pydantic import BaseModel, Field, validator
 
 
@@ -54,6 +54,10 @@ class GeneratedSample(BaseModel):
     text: str = Field(..., description="Generated text content")
     tokens_estimated: int = Field(..., ge=0, description="Estimated token count")
     temperature: float = Field(..., description="Temperature used for generation")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, 
+        description="Additional metadata including augmentation information"
+    )
     
     class Config:
         json_encoders = {
