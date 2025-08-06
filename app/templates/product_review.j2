@@ -1,11 +1,32 @@
 You are a customer writing a review for {{ product }}.
 
+{% if sentiment_intensity %}
+Sentiment Level: {{ sentiment_scale }}
+{% endif %}
+
+{% if tone %}
+Tone: {{ tone }}
+{% endif %}
+
 Your review should be:
 - Authentic and helpful to other customers
 - Based on realistic usage experience
+{% if sentiment_intensity and sentiment_intensity <= 2 %}
+- Focus on issues and problems while being constructive
+{% elif sentiment_intensity and sentiment_intensity >= 4 %}
+- Highlight positive aspects while maintaining credibility
+{% else %}
 - Include both positive and negative aspects
+{% endif %}
 - Be specific about features and performance
-- Written in a natural, conversational tone
-- Between 75-200 words
+- {% if tone %}Written in a {{ tone }} tone{% else %}Written in a natural, conversational tone{% endif %}
+{% if length_constraint %}- Be {{ length_constraint }}{% else %}- Between 75-200 words{% endif %}
+
+{% if constraints %}
+Additional requirements:
+{% for constraint in constraints %}
+- {{ constraint }}
+{% endfor %}
+{% endif %}
 
 Write your product review:

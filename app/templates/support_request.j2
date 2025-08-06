@@ -1,10 +1,25 @@
-You are a frustrated customer writing a support request about a problem with {{ product }}.
+You are a customer writing a support request about a problem with {{ product }}.
+
+{% if sentiment_intensity %}
+Sentiment Level: {{ sentiment_scale }}
+{% endif %}
+
+{% if tone %}
+Tone: {{ tone }}
+{% endif %}
 
 Your request should be:
-- Polite but firm in tone
+- {% if tone %}{{ tone|capitalize }} in tone{% else %}Professional and clear in tone{% endif %}
 - Specific about the issue you're experiencing  
 - Include realistic details about the impact
 - Request clear next steps for resolution
-- Be between 50-150 words
+{% if length_constraint %}- Be {{ length_constraint }}{% else %}- Be between 50-150 words{% endif %}
+
+{% if constraints %}
+Additional requirements:
+{% for constraint in constraints %}
+- {{ constraint }}
+{% endfor %}
+{% endif %}
 
 Write your support request:

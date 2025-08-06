@@ -144,6 +144,146 @@ def run_generation_task(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
 
 @celery_app.task(
     bind=True,
+    name='run_enhanced_generation_task',
+    autoretry_for=(LLMException, ConnectionError),
+    retry_kwargs={'max_retries': 3, 'countdown': 60},
+    soft_time_limit=300,  # 5 minutes soft limit
+    time_limit=600  # 10 minutes hard limit
+)
+def run_enhanced_generation_task(self, enhanced_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Celery task for enhanced text generation with few-shot learning and quality filtering.
+    
+    Args:
+        enhanced_params: Dictionary containing:
+            - request: Generation request parameters
+            - sentiment_intensity: Sentiment scale 1-5
+            - tone: Desired tone
+            - enable_few_shot: Whether to use few-shot learning
+            - enable_quality_filter: Whether to apply quality filtering
+            - min_quality_score: Minimum quality threshold
+    
+    Returns:
+        Task result dictionary with generation response
+    """
+    try:
+        logger.info(f"Starting enhanced generation task {self.request.id}")
+        
+        # Extract parameters
+        request_data = enhanced_params['request']
+        request = GenerationRequest(**request_data)
+        
+        sentiment_intensity = enhanced_params.get('sentiment_intensity')
+        tone = enhanced_params.get('tone')
+        enable_few_shot = enhanced_params.get('enable_few_shot', True)
+        enable_quality_filter = enhanced_params.get('enable_quality_filter', True)
+        min_quality_score = enhanced_params.get('min_quality_score', 0.6)
+        
+        # Update quality filter config if specified
+        if enable_quality_filter:
+            from app.services.quality_service import QualityFilterConfig, get_quality_service
+            quality_config = QualityFilterConfig(min_overall_score=min_quality_score)
+            # Reset service to use new config
+            from app.services.quality_service import reset_quality_service
+            reset_quality_service()
+            get_quality_service(quality_config)
+        
+        # Initialize generation service
+        service = GenerationService()
+        
+        # Progress callback for updates
+        async def progress_callback(progress: int):
+            self.update_state(
+                state='PROGRESS',
+                meta={
+                    'current': progress,
+                    'total': 100,
+                    'status': f'Enhanced generation... {progress}%',
+                    'started_at': datetime.now(timezone.utc).isoformat(),
+                    'features': {
+                        'few_shot_learning': enable_few_shot,
+                        'quality_filtering': enable_quality_filter,
+                        'sentiment_intensity': sentiment_intensity,
+                        'tone': tone
+                    }
+                }
+            )
+        
+        # Run the enhanced generation logic
+        async def run_enhanced_generation():
+            return await service.generate_batch(
+                request=request,
+                progress_callback=progress_callback,
+                enable_quality_filter=enable_quality_filter,
+                sentiment_intensity=sentiment_intensity,
+                tone=tone,
+                enable_few_shot=enable_few_shot
+            )
+        
+        # Execute the enhanced generation
+        result = run_async_in_sync(run_enhanced_generation())
+        
+        # Update final state with enhanced metadata
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'current': 100,
+                'total': 100,
+                'status': 'Enhanced generation completed successfully',
+                'started_at': datetime.now(timezone.utc).isoformat(),
+                'completed_at': datetime.now(timezone.utc).isoformat(),
+                'features_used': {
+                    'few_shot_learning': enable_few_shot,
+                    'quality_filtering': enable_quality_filter,
+                    'sentiment_intensity': sentiment_intensity,
+                    'tone': tone
+                },
+                'quality_info': result.metadata if hasattr(result, 'metadata') and result.metadata else {}
+            }
+        )
+        
+        logger.info(
+            f"Enhanced generation task {self.request.id} completed: "
+            f"{result.total_samples} samples, ~{result.total_tokens_estimated} tokens, "
+            f"quality_filter={enable_quality_filter}, few_shot={enable_few_shot}"
+        )
+        
+        return {
+            'status': 'SUCCESS',
+            'result': result.dict(),
+            'task_id': self.request.id,
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+            'enhancement_features': {
+                'few_shot_learning': enable_few_shot,
+                'quality_filtering': enable_quality_filter,
+                'sentiment_intensity': sentiment_intensity,
+                'tone': tone,
+                'min_quality_score': min_quality_score
+            }
+        }
+        
+    except Exception as exc:
+        logger.error(f"Enhanced generation task {self.request.id} failed: {exc}")
+        logger.error(traceback.format_exc())
+        
+        # Update state with error information
+        self.update_state(
+            state='FAILURE',
+            meta={
+                'error': str(exc),
+                'error_type': type(exc).__name__,
+                'failed_at': datetime.now(timezone.utc).isoformat(),
+                'traceback': traceback.format_exc(),
+                'enhancement_features': enhanced_params
+            }
+        )
+        
+        # Re-raise for Celery to handle
+        raise exc
+
+
+@celery_app.task(
+    bind=True,
     name='run_augmented_generation_task', 
     autoretry_for=(LLMException, ConnectionError),
     retry_kwargs={'max_retries': 3, 'countdown': 60},

@@ -316,6 +316,92 @@ async def cancel_job(job_id: str) -> Dict[str, str]:
         raise HTTPException(status_code=500, detail=f"Cancellation failed: {str(e)}")
 
 
+@router.post("/generate-enhanced", response_model=JobStatusResponse)
+async def create_enhanced_generation_job(
+    request: GenerationRequest,
+    sentiment_intensity: int = Query(
+        default=None,
+        ge=1,
+        le=5,
+        description="Sentiment intensity scale 1-5 (1=Very Negative, 5=Very Positive)"
+    ),
+    tone: str = Query(
+        default=None,
+        description="Desired tone (frustrated, polite, urgent, professional, etc.)"
+    ),
+    enable_few_shot: bool = Query(
+        default=True,
+        description="Enable few-shot learning with examples"
+    ),
+    enable_quality_filter: bool = Query(
+        default=True,
+        description="Enable quality filtering and deduplication"
+    ),
+    min_quality_score: float = Query(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Minimum quality score threshold for filtering"
+    )
+) -> JobStatusResponse:
+    """
+    Create an enhanced generation job with few-shot learning and quality filtering.
+    
+    Features:
+    - Few-shot learning with domain-specific examples
+    - Sentiment intensity control (1-5 scale)
+    - Tone specification for consistent output
+    - Quality filtering with deduplication
+    - Enhanced prompt engineering
+    
+    Args:
+        request: Generation parameters
+        sentiment_intensity: Sentiment scale 1-5
+        tone: Desired tone for generation
+        enable_few_shot: Whether to include few-shot examples
+        enable_quality_filter: Whether to apply quality filtering
+        min_quality_score: Minimum quality threshold
+        
+    Returns:
+        Job status response with job ID
+    """
+    try:
+        logger.info(f"Creating enhanced generation job for product: {request.product}")
+        
+        # Validate request
+        generation_service = get_generation_service()
+        validation = await generation_service.validate_generation_request(request)
+        
+        if not validation["valid"]:
+            error_message = "; ".join(validation["errors"])
+            raise HTTPException(status_code=400, detail=f"Invalid request: {error_message}")
+        
+        # Create enhanced generation job with parameters
+        celery_service = get_celery_job_service()
+        job_id = celery_service.create_enhanced_generation_job(
+            request=request,
+            sentiment_intensity=sentiment_intensity,
+            tone=tone,
+            enable_few_shot=enable_few_shot,
+            enable_quality_filter=enable_quality_filter,
+            min_quality_score=min_quality_score
+        )
+        
+        # Return job status
+        job_status = celery_service.get_job_status(job_id)
+        if not job_status:
+            raise HTTPException(status_code=500, detail="Failed to create enhanced job")
+        
+        logger.info(f"Created enhanced generation job {job_id}")
+        return job_status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create enhanced generation job: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.post("/generate-augmented", response_model=JobStatusResponse)
 async def create_augmented_generation_job(
     request: GenerationRequest,
@@ -494,6 +580,93 @@ async def get_rate_limit_status() -> Dict[str, Any]:
             status_code=500,
             detail=f"Failed to retrieve rate limit status: {str(e)}"
         )
+
+
+@router.get("/config")
+async def get_generation_config() -> Dict[str, Any]:
+    """
+    Get current generation configuration and capabilities.
+    
+    Returns:
+        Available features, templates, and configuration options
+    """
+    try:
+        from app.services.prompt_service import get_template_service
+        from app.services.data_augmentation_service import get_augmentation_service
+        
+        template_service = get_template_service()
+        augmentation_service = get_augmentation_service()
+        settings = get_settings()
+        
+        config = {
+            "features": {
+                "few_shot_learning": True,
+                "quality_filtering": True,
+                "data_augmentation": True,
+                "sentiment_intensity_control": True,
+                "tone_control": True,
+                "rate_limiting": True
+            },
+            "templates": {
+                "available": template_service.list_templates(),
+                "default": settings.default_prompt_template
+            },
+            "sentiment_intensity": {
+                "scale": "1-5",
+                "descriptions": {
+                    1: "Very Negative - Highly dissatisfied, angry, or frustrated",
+                    2: "Negative - Dissatisfied or disappointed",
+                    3: "Neutral - Balanced or indifferent", 
+                    4: "Positive - Satisfied or pleased",
+                    5: "Very Positive - Extremely satisfied, delighted, or enthusiastic"
+                }
+            },
+            "tone_options": [
+                "frustrated", "polite", "urgent", "professional", "casual",
+                "formal", "friendly", "concerned", "enthusiastic", "neutral"
+            ],
+            "augmentation_strategies": augmentation_service.get_strategy_info(),
+            "quality_filtering": {
+                "default_min_score": 0.6,
+                "metrics": ["overall_score", "coherence_score", "relevance_score", "uniqueness_score"],
+                "deduplication": True
+            },
+            "limits": {
+                "max_samples": getattr(settings, 'max_samples_per_request', 100),
+                "min_samples": 1,
+                "max_tokens": settings.openai_max_tokens
+            }
+        }
+        
+        return config
+        
+    except Exception as e:
+        logger.error(f"Failed to get generation config: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/quality-stats")
+async def get_quality_filter_stats() -> Dict[str, Any]:
+    """
+    Get quality filtering statistics and performance metrics.
+    
+    Returns:
+        Quality filtering performance and statistics
+    """
+    try:
+        from app.services.quality_service import get_quality_service
+        
+        quality_service = get_quality_service()
+        stats = quality_service.get_filter_stats()
+        
+        return {
+            "filter_stats": stats,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get quality stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 # Error handling is managed by the global exception handler in main.py

@@ -9,7 +9,8 @@ from typing import List, Dict, Any
 from app.config import get_settings
 from app.models.schemas import GenerationRequest, GeneratedSample, GenerationResponse
 from app.utils.llm_client import get_llm_client, LLMException
-from app.services.prompt_service import render_prompt, get_default_template_context
+from app.services.prompt_service import render_enhanced_prompt, get_default_template_context
+from app.services.quality_service import get_quality_service, QualityFilterConfig, QualityMetrics
 from app.services.job_manager import get_job_manager
 
 logger = logging.getLogger(__name__)
@@ -21,11 +22,15 @@ class GenerationService:
     def __init__(self):
         """Initialize generation service."""
         self.settings = get_settings()
+        self.quality_service = get_quality_service()
         
     async def generate_single_sample(
         self,
         request: GenerationRequest,
-        sample_index: int = 0
+        sample_index: int = 0,
+        sentiment_intensity: int = None,
+        tone: str = None,
+        enable_few_shot: bool = True
     ) -> GeneratedSample:
         """
         Generate a single text sample.
@@ -47,9 +52,18 @@ class GenerationService:
             # Prepare template context
             context = get_default_template_context(request.product)
             
-            # Render prompt template
+            # Render enhanced prompt template with few-shot learning
             template_name = self.settings.default_prompt_template
-            prompt = render_prompt(template_name, context, request.version)
+            prompt = render_enhanced_prompt(
+                template_name=template_name,
+                context=context,
+                sentiment_intensity=sentiment_intensity,
+                tone=tone,
+                enable_few_shot=enable_few_shot,
+                domain_constraints=["Include realistic details", "Be specific and actionable"],
+                min_length=50,
+                max_length=200
+            )
             
             # Generate text
             generated_text = await llm_client.generate(
@@ -82,7 +96,11 @@ class GenerationService:
     async def generate_batch(
         self,
         request: GenerationRequest,
-        progress_callback=None
+        progress_callback=None,
+        enable_quality_filter: bool = True,
+        sentiment_intensity: int = None,
+        tone: str = None,
+        enable_few_shot: bool = True
     ) -> GenerationResponse:
         """
         Generate a batch of text samples concurrently.
@@ -100,9 +118,11 @@ class GenerationService:
         logger.info(f"Starting batch generation: {request.count} samples for '{request.product}'")
         
         try:
-            # Create generation tasks
+            # Create generation tasks with enhanced features
             tasks = [
-                self.generate_single_sample(request, i)
+                self.generate_single_sample(
+                    request, i, sentiment_intensity, tone, enable_few_shot
+                )
                 for i in range(request.count)
             ]
             
@@ -132,16 +152,63 @@ class GenerationService:
                     progress = int((completed / request.count) * 100)
                     await progress_callback(progress)
             
-            # Calculate total tokens
-            total_tokens = sum(sample.tokens_estimated for sample in samples)
+            # Apply quality filtering if enabled
+            filtered_samples = samples
+            quality_metrics = []
+            filter_stats = {}
             
+            if enable_quality_filter and samples:
+                logger.info(f"Applying quality filtering to {len(samples)} samples")
+                
+                # Filter samples based on quality
+                context = {
+                    'template_type': self.settings.default_prompt_template,
+                    'product': request.product
+                }
+                
+                filtered_samples, quality_metrics = await self.quality_service.filter_batch(
+                    samples, context
+                )
+                
+                filter_stats = self.quality_service.get_filter_stats()
+                
+                logger.info(
+                    f"Quality filtering completed: {len(filtered_samples)}/{len(samples)} samples passed "
+                    f"(pass rate: {filter_stats.get('pass_rate', 0.0):.1%})"
+                )
+            
+            # Calculate total tokens for filtered samples
+            total_tokens = sum(sample.tokens_estimated for sample in filtered_samples)
+            
+            # Create response with quality information
             response = GenerationResponse(
-                samples=samples,
-                total_samples=len(samples),
+                samples=filtered_samples,
+                total_samples=len(filtered_samples),
                 total_tokens_estimated=total_tokens
             )
             
-            logger.info(f"Batch generation completed: {len(samples)} samples, ~{total_tokens} tokens")
+            # Add quality metadata to response
+            if quality_metrics:
+                avg_quality = sum(m.overall_score for m in quality_metrics) / len(quality_metrics)
+                response.metadata = {
+                    'quality_filter_enabled': enable_quality_filter,
+                    'original_sample_count': len(samples),
+                    'filtered_sample_count': len(filtered_samples),
+                    'filter_stats': filter_stats,
+                    'average_quality_score': avg_quality,
+                    'quality_metrics': [
+                        {
+                            'sample_id': sample.id,
+                            'overall_score': metric.overall_score,
+                            'coherence_score': metric.coherence_score,
+                            'relevance_score': metric.relevance_score,
+                            'uniqueness_score': metric.uniqueness_score
+                        }
+                        for sample, metric in zip(filtered_samples, quality_metrics)
+                    ] if len(quality_metrics) <= 10 else []  # Limit metadata size
+                }
+            
+            logger.info(f"Batch generation completed: {len(filtered_samples)} samples, ~{total_tokens} tokens")
             return response
             
         except Exception as e:

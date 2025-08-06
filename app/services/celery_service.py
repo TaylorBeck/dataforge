@@ -14,7 +14,7 @@ from celery.exceptions import WorkerLostError, Retry
 
 from app.celery_app import celery_app
 from app.models.schemas import JobStatusResponse, GenerationResponse, GenerationRequest
-from app.services.celery_tasks import run_generation_task, run_augmented_generation_task
+from app.services.celery_tasks import run_generation_task, run_enhanced_generation_task, run_augmented_generation_task
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,52 @@ class CeleryJobService:
             
         except Exception as e:
             logger.error(f"Failed to create Celery generation job: {e}")
+            raise
+    
+    def create_enhanced_generation_job(
+        self,
+        request: GenerationRequest,
+        sentiment_intensity: int = None,
+        tone: str = None,
+        enable_few_shot: bool = True,
+        enable_quality_filter: bool = True,
+        min_quality_score: float = 0.6
+    ) -> str:
+        """
+        Create an enhanced generation job with few-shot learning and quality filtering.
+        
+        Args:
+            request: Generation request parameters
+            sentiment_intensity: Sentiment scale 1-5
+            tone: Desired tone for generation
+            enable_few_shot: Whether to include few-shot examples
+            enable_quality_filter: Whether to apply quality filtering
+            min_quality_score: Minimum quality threshold
+            
+        Returns:
+            Task ID (job ID) for tracking
+        """
+        try:
+            logger.info(f"Creating enhanced Celery generation job for product: {request.product}")
+            
+            # Prepare enhanced parameters
+            enhanced_params = {
+                "request": request.dict(),
+                "sentiment_intensity": sentiment_intensity,
+                "tone": tone,
+                "enable_few_shot": enable_few_shot,
+                "enable_quality_filter": enable_quality_filter,
+                "min_quality_score": min_quality_score
+            }
+            
+            # Submit enhanced task to Celery
+            task = run_enhanced_generation_task.delay(enhanced_params)
+            
+            logger.info(f"Created enhanced Celery generation job {task.id}")
+            return task.id
+            
+        except Exception as e:
+            logger.error(f"Failed to create enhanced Celery generation job: {e}")
             raise
     
     def create_augmented_generation_job(
