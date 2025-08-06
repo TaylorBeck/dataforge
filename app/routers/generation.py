@@ -13,6 +13,7 @@ from app.models.schemas import (
 )
 from app.services.job_manager import get_job_manager
 from app.services.generation_service import get_generation_service, run_generation_job
+from app.services.celery_service import get_celery_job_service
 from app.services.rate_limiting_service import get_rate_limit_manager
 from app.utils.llm_client import get_llm_client, test_llm_client
 from app.config import get_settings
@@ -26,18 +27,16 @@ router = APIRouter(prefix="/api", tags=["generation"])
 
 @router.post("/generate", response_model=JobStatusResponse)
 async def create_generation_job(
-    request: GenerationRequest,
-    background_tasks: BackgroundTasks
+    request: GenerationRequest
 ) -> JobStatusResponse:
     """
-    Create a new text generation job.
+    Create a new text generation job using Celery.
     
     This endpoint accepts a generation request and returns a job ID immediately.
-    The actual generation happens in the background.
+    The actual generation happens in Celery worker processes for better scalability.
     
     Args:
         request: Generation parameters including product, count, and version
-        background_tasks: FastAPI background tasks for async processing
         
     Returns:
         Job status response with job ID and initial status
@@ -46,7 +45,7 @@ async def create_generation_job(
         HTTPException: On validation errors or system unavailability
     """
     try:
-        logger.info(f"Creating generation job for product: {request.product}")
+        logger.info(f"Creating Celery generation job for product: {request.product}")
         
         # Validate request
         generation_service = get_generation_service()
@@ -61,19 +60,16 @@ async def create_generation_job(
             for warning in validation["warnings"]:
                 logger.warning(f"Generation request warning: {warning}")
         
-        # Create job
-        job_manager = await get_job_manager()
-        job_id = await job_manager.create_job(request)
-        
-        # Start background generation task
-        background_tasks.add_task(run_generation_job, request, job_id)
+        # Create Celery job
+        celery_service = get_celery_job_service()
+        job_id = celery_service.create_generation_job(request)
         
         # Return job status
-        job_status = await job_manager.get_job_status(job_id)
+        job_status = celery_service.get_job_status(job_id)
         if not job_status:
             raise HTTPException(status_code=500, detail="Failed to create job")
         
-        logger.info(f"Created generation job {job_id}")
+        logger.info(f"Created Celery generation job {job_id}")
         return job_status
         
     except HTTPException:
@@ -86,10 +82,10 @@ async def create_generation_job(
 @router.get("/result/{job_id}", response_model=JobStatusResponse)
 async def get_job_result(job_id: str) -> JobStatusResponse:
     """
-    Get job status and results.
+    Get job status and results from Celery.
     
     Args:
-        job_id: Unique job identifier
+        job_id: Unique job identifier (Celery task ID)
         
     Returns:
         Job status with results if completed
@@ -98,8 +94,8 @@ async def get_job_result(job_id: str) -> JobStatusResponse:
         HTTPException: If job not found
     """
     try:
-        job_manager = await get_job_manager()
-        job_status = await job_manager.get_job_status(job_id)
+        celery_service = get_celery_job_service()
+        job_status = celery_service.get_job_status(job_id)
         
         if not job_status:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
@@ -124,7 +120,7 @@ async def health_check() -> HealthCheckResponse:
     try:
         settings = get_settings()
         
-        # Check Redis connection
+        # Check Redis connection (still used by Celery)
         redis_connected = False
         try:
             job_manager = await get_job_manager()
@@ -132,8 +128,16 @@ async def health_check() -> HealthCheckResponse:
         except Exception as e:
             logger.warning(f"Redis health check failed: {e}")
         
-        # Determine overall health
-        status = "healthy" if redis_connected else "unhealthy"
+        # Check Celery workers
+        celery_healthy = False
+        try:
+            celery_service = get_celery_job_service()
+            celery_healthy = celery_service.health_check()
+        except Exception as e:
+            logger.warning(f"Celery health check failed: {e}")
+        
+        # Determine overall health (needs both Redis and Celery)
+        status = "healthy" if (redis_connected and celery_healthy) else "unhealthy"
         
         return HealthCheckResponse(
             status=status,
@@ -155,18 +159,26 @@ async def health_check() -> HealthCheckResponse:
 @router.get("/stats")
 async def get_system_stats() -> Dict[str, Any]:
     """
-    Get system statistics.
+    Get system statistics including Celery worker information.
     
     Returns:
         Dictionary with system statistics
     """
     try:
-        job_manager = await get_job_manager()
         generation_service = get_generation_service()
         settings = get_settings()
         
-        # Get job statistics
-        job_stats = await job_manager.get_job_stats()
+        # Get Celery job statistics
+        celery_service = get_celery_job_service()
+        celery_stats = celery_service.get_job_stats()
+        
+        # Get legacy job manager stats for comparison (if needed)
+        legacy_job_stats = {}
+        try:
+            job_manager = await get_job_manager()
+            legacy_job_stats = await job_manager.get_job_stats()
+        except Exception as e:
+            logger.warning(f"Legacy job manager stats unavailable: {e}")
         
         # Get LLM client info
         llm_client = get_llm_client()
@@ -176,14 +188,24 @@ async def get_system_stats() -> Dict[str, Any]:
             "service": {
                 "name": settings.api_title,
                 "version": settings.api_version,
-                "debug": settings.debug
+                "debug": settings.debug,
+                "task_queue": "celery"
             },
-            "jobs": job_stats,
+            "celery": {
+                "active_jobs": celery_stats.get("active_jobs", 0),
+                "scheduled_jobs": celery_stats.get("scheduled_jobs", 0),
+                "reserved_jobs": celery_stats.get("reserved_jobs", 0),
+                "total_pending_jobs": celery_stats.get("total_pending_jobs", 0),
+                "active_workers": celery_stats.get("active_workers", 0),
+                "worker_stats": celery_stats.get("worker_stats", {})
+            },
+            "legacy_jobs": legacy_job_stats,  # For migration period comparison
             "llm": llm_info,
             "limits": {
                 "max_samples_per_request": settings.max_samples_per_request,
-                "max_concurrent_jobs": settings.max_concurrent_jobs,
-                "job_timeout_seconds": settings.job_timeout_seconds
+                "celery_task_time_limit": settings.celery_task_time_limit,
+                "celery_task_soft_time_limit": settings.celery_task_soft_time_limit,
+                "celery_max_retries": settings.celery_max_retries
             }
         }
         
@@ -243,22 +265,22 @@ async def validate_generation_request(request: GenerationRequest) -> Dict[str, A
 @router.delete("/job/{job_id}")
 async def cancel_job(job_id: str) -> Dict[str, str]:
     """
-    Cancel a running job (best effort).
+    Cancel a running Celery job.
     
-    Note: This is a best-effort cancellation. Jobs that are already 
-    generating may complete before cancellation takes effect.
+    Celery provides better cancellation capabilities than the legacy system,
+    with the ability to terminate running tasks.
     
     Args:
-        job_id: Job identifier to cancel
+        job_id: Job identifier (Celery task ID) to cancel
         
     Returns:
         Cancellation status
     """
     try:
-        job_manager = await get_job_manager()
+        celery_service = get_celery_job_service()
         
         # Check if job exists
-        job_status = await job_manager.get_job_status(job_id)
+        job_status = celery_service.get_job_status(job_id)
         if not job_status:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         
@@ -270,22 +292,22 @@ async def cancel_job(job_id: str) -> Dict[str, str]:
                 "message": f"Job is already {job_status.status}"
             }
         
-        # Update job status to error (cancellation)
-        success = await job_manager.update_job_status(
-            job_id=job_id,
-            status="error",
-            error_message="Job cancelled by user"
-        )
+        # Cancel the Celery task
+        success = celery_service.cancel_job(job_id)
         
         if success:
-            logger.info(f"Cancelled job {job_id}")
+            logger.info(f"Cancelled Celery job {job_id}")
             return {
                 "job_id": job_id,
                 "status": "cancelled",
-                "message": "Job cancellation requested"
+                "message": "Job cancellation requested and sent to workers"
             }
         else:
-            raise HTTPException(status_code=500, detail="Failed to cancel job")
+            return {
+                "job_id": job_id,
+                "status": "cancel_failed", 
+                "message": "Job could not be cancelled (may have already finished)"
+            }
             
     except HTTPException:
         raise
@@ -297,7 +319,6 @@ async def cancel_job(job_id: str) -> Dict[str, str]:
 @router.post("/generate-augmented", response_model=JobStatusResponse)
 async def create_augmented_generation_job(
     request: GenerationRequest,
-    background_tasks: BackgroundTasks,
     augmentation_strategies: List[str] = Query(
         default=["CDA"], 
         description="Augmentation strategies to apply: CDA, ADA, CADA"
@@ -347,25 +368,20 @@ async def create_augmented_generation_job(
                       f"Valid options: {valid_strategies}"
             )
         
-        # Create job
-        job_manager = await get_job_manager()
-        job_id = await job_manager.create_job(request)
-        
-        # Start background augmented generation task
-        background_tasks.add_task(
-            run_augmented_generation_job, 
-            request, 
-            job_id, 
+        # Create Celery job
+        celery_service = get_celery_job_service()
+        job_id = celery_service.create_augmented_generation_job(
+            request,
             augmentation_strategies,
             augment_ratio
         )
         
         # Return job status
-        job_status = await job_manager.get_job_status(job_id)
+        job_status = celery_service.get_job_status(job_id)
         if not job_status:
             raise HTTPException(status_code=500, detail="Failed to create job")
         
-        logger.info(f"Created augmented generation job {job_id} with strategies: {augmentation_strategies}")
+        logger.info(f"Created Celery augmented generation job {job_id} with strategies: {augmentation_strategies}")
         return job_status
         
     except HTTPException:
@@ -416,45 +432,7 @@ async def get_augmentation_strategies():
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-async def run_augmented_generation_job(
-    request: GenerationRequest, 
-    job_id: str,
-    augmentation_strategies: List[str],
-    augment_ratio: float
-) -> None:
-    """
-    Background task to run augmented generation job.
-    
-    Args:
-        request: Generation request parameters
-        job_id: Job identifier
-        augmentation_strategies: List of augmentation strategies to apply
-        augment_ratio: Ratio of augmented to original samples
-    """
-    service = get_generation_service()
-    
-    try:
-        logger.info(f"Starting augmented generation job {job_id}")
-        
-        # Run generation with augmentation
-        response = await service.generate_with_augmentation(
-            request=request,
-            augmentation_strategies=augmentation_strategies,
-            augment_ratio=augment_ratio
-        )
-        
-        # Update job with results
-        job_manager = await get_job_manager()
-        await job_manager.complete_job(job_id, response)
-        
-        logger.info(f"Augmented generation job {job_id} completed successfully")
-        
-    except Exception as e:
-        logger.error(f"Augmented generation job {job_id} failed: {e}")
-        
-        # Update job with error
-        job_manager = await get_job_manager()
-        await job_manager.fail_job(job_id, str(e))
+# Note: run_augmented_generation_job function removed - now handled by Celery tasks
 
 
 @router.get("/rate-limit-status")

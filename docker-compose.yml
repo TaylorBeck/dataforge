@@ -11,10 +11,96 @@ services:
       - DEFAULT_LLM_PROVIDER=mock
       # Add your API keys here or use .env file
       # - OPENAI_API_KEY=your_key_here
+      - CELERY_WORKER_CONCURRENCY=4
+      - CELERY_TASK_TIME_LIMIT=600
+      - CELERY_TASK_SOFT_TIME_LIMIT=300
     depends_on:
       - redis
     volumes:
       - ./app/templates:/app/app/templates
+    restart: unless-stopped
+
+  # Celery worker for generation tasks
+  dataforge-worker-generation:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info --queues=generation --concurrency=4 --hostname=generation-worker@%h
+    environment:
+      - DEBUG=false
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_LLM_PROVIDER=mock
+      # Add your API keys here or use .env file
+      # - OPENAI_API_KEY=your_key_here
+      - CELERY_WORKER_CONCURRENCY=4
+      - CELERY_TASK_TIME_LIMIT=600
+      - CELERY_TASK_SOFT_TIME_LIMIT=300
+    depends_on:
+      - redis
+    volumes:
+      - ./app/templates:/app/app/templates
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  # Celery worker for augmentation tasks (more resource intensive)
+  dataforge-worker-augmentation:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info --queues=augmentation --concurrency=2 --hostname=augmentation-worker@%h
+    environment:
+      - DEBUG=false
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_LLM_PROVIDER=mock
+      # Add your API keys here or use .env file
+      # - OPENAI_API_KEY=your_key_here
+      - CELERY_WORKER_CONCURRENCY=2
+      - CELERY_TASK_TIME_LIMIT=1200
+      - CELERY_TASK_SOFT_TIME_LIMIT=600
+    depends_on:
+      - redis
+    volumes:
+      - ./app/templates:/app/app/templates
+    restart: unless-stopped
+
+  # Celery worker for maintenance tasks
+  dataforge-worker-maintenance:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info --queues=maintenance --concurrency=1 --hostname=maintenance-worker@%h
+    environment:
+      - DEBUG=false
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_LLM_PROVIDER=mock
+      - CELERY_WORKER_CONCURRENCY=1
+    depends_on:
+      - redis
+    volumes:
+      - ./app/templates:/app/app/templates
+    restart: unless-stopped
+
+  # Celery Beat scheduler for periodic tasks
+  dataforge-beat:
+    build: .
+    command: celery -A app.celery_app beat --loglevel=info
+    environment:
+      - DEBUG=false
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_LLM_PROVIDER=mock
+    depends_on:
+      - redis
+    volumes:
+      - ./app/templates:/app/app/templates
+    restart: unless-stopped
+
+  # Flower - Celery monitoring dashboard
+  dataforge-flower:
+    build: .
+    command: celery -A app.celery_app flower --port=5555 --broker=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    environment:
+      - DEBUG=false
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_LLM_PROVIDER=mock
+    depends_on:
+      - redis
     restart: unless-stopped
 
   redis:
@@ -24,7 +110,7 @@ services:
     volumes:
       - redis_data:/data
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
 
 volumes:
   redis_data:

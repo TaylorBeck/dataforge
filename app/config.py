@@ -44,13 +44,51 @@ class Settings(BaseSettings):
         10,
         ge=1,
         le=100,
-        description="Maximum concurrent generation jobs"
+        description="Maximum concurrent generation jobs (legacy, now handled by Celery)"
     )
     job_timeout_seconds: int = Field(
         300,
         ge=60,
         le=3600,
-        description="Job timeout in seconds"
+        description="Job timeout in seconds (legacy, now handled by Celery)"
+    )
+    
+    # Celery Configuration
+    celery_task_time_limit: int = Field(
+        600,
+        ge=60,
+        le=3600,
+        description="Celery task hard time limit in seconds"
+    )
+    celery_task_soft_time_limit: int = Field(
+        300,
+        ge=30,
+        le=1800,
+        description="Celery task soft time limit in seconds"
+    )
+    celery_worker_concurrency: int = Field(
+        4,
+        ge=1,
+        le=20,
+        description="Number of concurrent Celery worker processes"
+    )
+    celery_max_retries: int = Field(
+        3,
+        ge=0,
+        le=10,
+        description="Maximum number of task retries"
+    )
+    celery_retry_delay: int = Field(
+        60,
+        ge=1,
+        le=600,
+        description="Delay between retries in seconds"
+    )
+    celery_result_expires: int = Field(
+        7200,
+        ge=300,
+        le=86400,
+        description="Time in seconds before task results expire"
     )
     
     # LLM Configuration
