@@ -147,6 +147,11 @@ def create_app() -> FastAPI:
             "health_url": "/api/health"
         }
     
+    @app.get("/health", tags=["health"])
+    async def simple_health():
+        """Simple health endpoint for Railway load balancer."""
+        return {"status": "ok"}
+    
     # Middleware for request logging (in debug mode)
     if settings.debug:
         @app.middleware("http")
