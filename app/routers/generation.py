@@ -136,14 +136,8 @@ async def health_check() -> HealthCheckResponse:
         except Exception as e:
             logger.warning(f"Celery health check failed: {e}")
         
-        # Determine overall health
-        # For initial deployment, allow "degraded" status if only Redis works
-        if redis_connected and celery_healthy:
-            status = "healthy"
-        elif redis_connected:
-            status = "degraded"  # Web API works, but background jobs don't
-        else:
-            status = "unhealthy"
+        # Determine overall health (needs both Redis and Celery)
+        status = "healthy" if (redis_connected and celery_healthy) else "unhealthy"
         
         return HealthCheckResponse(
             status=status,

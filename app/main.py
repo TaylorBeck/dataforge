@@ -144,15 +144,8 @@ def create_app() -> FastAPI:
             "version": settings.api_version,
             "description": settings.api_description,
             "docs_url": "/docs" if settings.debug else "Documentation disabled in production",
-            "health_url": "/api/health",
-            "status": "running"
+            "health_url": "/api/health"
         }
-    
-    # Simple health endpoint for load balancers
-    @app.get("/health", tags=["health"])
-    async def simple_health():
-        """Simple health check for load balancers."""
-        return {"status": "ok", "service": "dataforge"}
     
     # Middleware for request logging (in debug mode)
     if settings.debug:
