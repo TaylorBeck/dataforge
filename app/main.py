@@ -5,6 +5,7 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -150,7 +151,7 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["health"])
     async def simple_health():
         """Simple health endpoint for Railway load balancer."""
-        return {"status": "ok"}
+        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
     
     # Middleware for request logging (in debug mode)
     if settings.debug:
