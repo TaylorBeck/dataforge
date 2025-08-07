@@ -42,4 +42,7 @@ celery -A app.celery_app worker \
 sleep 3
 
 # Start FastAPI server
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Use Railway's PORT environment variable, fallback to 8000
+PORT=${PORT:-8000}
+echo "Starting server on port: $PORT"
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
