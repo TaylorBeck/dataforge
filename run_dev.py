@@ -97,7 +97,7 @@ def run_server():
     print("🚀 Starting DataForge API server...")
     print("📖 API documentation will be available at: http://localhost:8000/docs")
     print("🔍 Health check: http://localhost:8000/api/health")
-    print("📊 System stats: http://localhost:8000/api/stats")
+    # /api/stats removed
     print()
     print("Press Ctrl+C to stop the server")
     print("="*50)

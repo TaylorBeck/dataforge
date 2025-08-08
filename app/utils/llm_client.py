@@ -98,10 +98,13 @@ class OpenAIClient(LLMClientInterface):
                 async with rate_limit_manager.rate_limited_request(estimated_tokens=estimated_tokens) as limiter:
                     response = await self._make_openai_request(prompt, temperature, max_tokens)
                     
-                    # Extract rate limit headers and update manager
-                    if hasattr(response, '_raw_response') and hasattr(response._raw_response, 'headers'):
-                        headers = dict(response._raw_response.headers)
-                        rate_limit_manager.update_rate_limits_from_headers(headers)
+                    # Extract rate limit headers from various possible SDK response locations
+                    headers = self._extract_headers_safe(response)
+                    if headers:
+                        try:
+                            rate_limit_manager.update_rate_limits_from_headers(headers)
+                        except Exception:
+                            logger.debug("Failed to update rate limits from headers; continuing")
                     
                     return self._process_openai_response(response)
             else:
@@ -123,6 +126,7 @@ class OpenAIClient(LLMClientInterface):
     
     async def _make_openai_request(self, prompt: str, temperature: float, max_tokens: int):
         """Make the actual OpenAI API request"""
+        # Use chat completions for broad compatibility; models are configurable via settings
         return await self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
@@ -141,6 +145,25 @@ class OpenAIClient(LLMClientInterface):
             raise LLMException("Empty content returned from OpenAI")
             
         return content.strip()
+
+    def _extract_headers_safe(self, response) -> Optional[Dict[str, Any]]:
+        """Best-effort extraction of HTTP headers from various SDK response shapes."""
+        candidate_attrs = [
+            'headers',
+            'response',
+            '_response',
+            '_raw_response',
+        ]
+        for attr in candidate_attrs:
+            if hasattr(response, attr):
+                obj = getattr(response, attr)
+                # Some SDKs nest the HTTPX response at .response or ._response
+                if hasattr(obj, 'headers'):
+                    try:
+                        return dict(obj.headers)
+                    except Exception:
+                        continue
+        return None
     
     async def get_model_info(self) -> Dict[str, Any]:
         """Get OpenAI model information."""

@@ -1,103 +1,129 @@
 # DataForge API
 
-A modern, production-ready FastAPI service for synthetic text data generation using Large Language Models (LLMs). Built for AI researchers, ML engineers, and developers who need high-quality, structured synthetic datasets.
+A FastAPI service for high-quality synthetic text generation using LLMs. Built for reliability and scalability.
 
-## 🚀 Features
+## Highlights
 
-- **Async Job Processing**: Non-blocking generation with Redis-backed job queue
-- **Pluggable LLM Support**: OpenAI GPT-4, Anthropic Claude, and mock providers
-- **Jinja2 Templating**: Flexible prompt templates with versioning
-- **Rich Metadata**: Every sample includes unique ID, timestamps, and token estimates
-- **Batch Generation**: Concurrent processing for optimal performance
-- **Production Ready**: Comprehensive error handling, logging, and monitoring
-- **Type Safe**: Full Pydantic validation and type hints
-- **Extensible**: Modular architecture for easy customization
+- Async, distributed job processing with Celery + Redis (broker + result backend)
+- Pluggable LLM client with OpenAI, Anthropic (stub), and Mock implementations
+- Jinja2 prompt templates with versioning and enhanced prompting options
+- Quality filtering, rate limiting, and data augmentation services
+- Strong typing via Pydantic v2, clear separation of concerns, and test coverage
 
-## 📋 Requirements
+## Architecture
 
-- Python 3.8+
-- Redis (for job management)
-- OpenAI API key (or configure alternative LLM)
+- API: FastAPI app (`app/main.py`, routes in `app/routers/`)
+- Job queue: Celery workers (`app/celery_app.py`, tasks in `app/services/celery_tasks.py`)
+- Broker/Backend: Redis (via Docker or local)
+- Services: prompt rendering, quality filtering, augmentation, rate limiting (`app/services/`)
+- LLM client: pluggable factory (`app/utils/llm_client.py`)
+- Job management: `JobStore` abstraction wrapping Celery (`app/services/job_store.py`)
 
-## 🛠️ Installation
+Key endpoints:
+- `POST /api/generate` – create a generation job
+- `POST /api/generate-enhanced` – few-shot, tone/sentiment controls, quality filtering
+- `POST /api/generate-augmented` – apply CDA/ADA/CADA augmentation strategies
+- `GET /api/result/{job_id}` – fetch job status/result
+- `POST /api/validate` – validate a request and estimate cost
+- `GET /api/health` – health of service and workers
+- `GET /api/test-llm` – smoke test of configured LLM client
 
-1. **Clone the repository**:
+## Prerequisites
+
+- Python 3.11+
+- Redis 7+
+- OpenAI API key (if not using the default Mock provider)
+
+## Quickstart
+
+### Option A: Docker Compose (recommended)
+
 ```bash
-git clone <repository-url>
-cd dataforge
+# From repository root
+docker compose up --build -d
+
+# Services
+# - API:            http://localhost:8000
+# - Flower (Celery): http://localhost:5555
+# - Redis:          localhost:6379
 ```
 
-2. **Install dependencies**:
+To tail logs:
 ```bash
+docker compose logs -f --tail=200
+```
+
+### Option B: Local development (virtualenv)
+
+```bash
+# 1) Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 2) Install dependencies
 pip install -r requirements.txt
-```
 
-3. **Set up environment variables**:
-```bash
-# Create .env file
-cp .env.example .env
-
-# Edit .env with your configuration
-OPENAI_API_KEY=your_openai_api_key_here
-REDIS_URL=redis://localhost:6379/0
-DEBUG=true
-```
-
-4. **Start Redis** (if not already running):
-```bash
-# Using Docker
+# 3) Start Redis (Docker or local)
 docker run -d -p 6379:6379 redis:7-alpine
+# or: redis-server
 
-# Or using local Redis
-redis-server
+# 4) Export environment (optional if using defaults)
+export DEFAULT_LLM_PROVIDER=mock
+export REDIS_URL=redis://localhost:6379/0
+
+# 5) Start the API
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-5. **Run the application**:
+Start background workers in separate terminals:
 ```bash
-# Development mode
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Celery workers (example queues and concurrency)
+celery -A app.celery_app worker --loglevel=info --queues=generation --concurrency=4 --hostname=generation-worker@%h
+celery -A app.celery_app worker --loglevel=info --queues=augmentation --concurrency=2 --hostname=augmentation-worker@%h
+celery -A app.celery_app worker --loglevel=info --queues=maintenance --concurrency=1 --hostname=maintenance-worker@%h
 
-# Or using the main script
-python app/main.py
+# Celery Beat (scheduled tasks)
+celery -A app.celery_app beat --loglevel=info
+
+# Flower (monitoring)
+celery -A app.celery_app flower --port=5555 --broker=redis://localhost:6379/0
 ```
 
-## 🔧 Configuration
+Convenience scripts are available under `scripts/` for local development.
 
-Configuration is managed through environment variables and a `.env` file:
+## Configuration
+
+Configuration is driven by environment variables (or a `.env` file). Defaults are provided in `app/config.py`.
 
 ```bash
-# API Configuration
+# API
 API_TITLE="DataForge API"
 API_VERSION="1.0.0"
 DEBUG=false
 
-# Redis Configuration
+# Redis
 REDIS_URL="redis://localhost:6379/0"
-REDIS_JOB_EXPIRE_SECONDS=3600
-REDIS_RESULT_EXPIRE_SECONDS=7200
 
 # Job Processing
 MAX_SAMPLES_PER_REQUEST=50
-MAX_CONCURRENT_JOBS=10
-JOB_TIMEOUT_SECONDS=300
 
-# LLM Configuration
-OPENAI_API_KEY="your_key_here"
-OPENAI_MODEL="gpt-4"
+# Celery
+CELERY_WORKER_CONCURRENCY=4
+CELERY_TASK_TIME_LIMIT=600
+CELERY_TASK_SOFT_TIME_LIMIT=300
+
+# LLM
+DEFAULT_LLM_PROVIDER=openai   # openai | anthropic | mock
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-4o
 OPENAI_MAX_TOKENS=500
-DEFAULT_LLM_PROVIDER="openai"  # openai, anthropic, mock
-
-# Template Configuration
-PROMPT_TEMPLATE_DIR="app/templates"
-DEFAULT_PROMPT_TEMPLATE="support_request.j2"
+OPENAI_PROMPT_RATE_PER_1K=0.005
+OPENAI_COMPLETION_RATE_PER_1K=0.015
 ```
 
-## 📚 API Usage
+## Usage
 
-### 1. Generate Synthetic Data
-
-**POST** `/api/generate`
-
+### 1) Create a job
 ```bash
 curl -X POST "http://localhost:8000/api/generate" \
   -H "Content-Type: application/json" \
@@ -109,74 +135,12 @@ curl -X POST "http://localhost:8000/api/generate" \
   }'
 ```
 
-**Response**:
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "pending",
-  "created_at": "2024-01-15T10:30:00Z",
-  "updated_at": "2024-01-15T10:30:00Z",
-  "error_message": null,
-  "result": null,
-  "progress": null
-}
-```
-
-### 2. Check Job Status
-
-**GET** `/api/result/{job_id}`
-
+### 2) Check job status
 ```bash
-curl "http://localhost:8000/api/result/550e8400-e29b-41d4-a716-446655440000"
+curl "http://localhost:8000/api/result/<job_id>"
 ```
 
-**Response** (when completed):
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "created_at": "2024-01-15T10:30:00Z",
-  "updated_at": "2024-01-15T10:31:30Z",
-  "error_message": null,
-  "result": {
-    "samples": [
-      {
-        "id": "sample-uuid-1",
-        "product": "mobile banking app",
-        "prompt_version": "v1",
-        "generated_at": "2024-01-15T10:31:15Z",
-        "text": "I'm experiencing issues with your mobile banking app...",
-        "tokens_estimated": 87,
-        "temperature": 0.7
-      }
-    ],
-    "total_samples": 5,
-    "total_tokens_estimated": 435
-  },
-  "progress": 100
-}
-```
-
-### 3. Health Check
-
-**GET** `/api/health`
-
-```bash
-curl "http://localhost:8000/api/health"
-```
-
-### 4. System Statistics
-
-**GET** `/api/stats`
-
-```bash
-curl "http://localhost:8000/api/stats"
-```
-
-### 5. Validate Request
-
-**POST** `/api/validate`
-
+### 3) Validate request (with cost estimate)
 ```bash
 curl -X POST "http://localhost:8000/api/validate" \
   -H "Content-Type: application/json" \
@@ -186,213 +150,93 @@ curl -X POST "http://localhost:8000/api/validate" \
   }'
 ```
 
-## 🎨 Custom Templates
+### 4) Enhanced and Augmented generation
+```bash
+# Enhanced (few-shot, tone, sentiment, quality filtering)
+curl -X POST "http://localhost:8000/api/generate-enhanced" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "product": "CRM suite",
+    "count": 3,
+    "version": "v1",
+    "temperature": 0.7
+  }'
 
-Create custom Jinja2 templates in `app/templates/`:
-
-```jinja2
-<!-- app/templates/custom_prompt.j2 -->
-You are a {{ role }} writing about {{ product }}.
-
-Context: {{ context }}
-Tone: {{ tone }}
-
-Write your response:
+# Augmented (CDA/ADA/CADA)
+curl -X POST "http://localhost:8000/api/generate-augmented?augmentation_strategies=CDA&augment_ratio=0.5" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "product": "analytics platform",
+    "count": 3,
+    "version": "v1",
+    "temperature": 0.7
+  }'
 ```
 
-Use in requests:
-```python
-# Update DEFAULT_PROMPT_TEMPLATE in config
-DEFAULT_PROMPT_TEMPLATE="custom_prompt.j2"
+### 5) Health and LLM tests
+```bash
+curl "http://localhost:8000/api/health"
+curl -X POST "http://localhost:8000/api/test-llm"
 ```
 
-## 🔌 Adding New LLM Providers
+## Project Structure
 
-1. **Implement the interface**:
-
-```python
-# app/utils/llm_client.py
-class CustomLLMClient(LLMClientInterface):
-    async def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = None) -> str:
-        # Your implementation
-        pass
-    
-    async def get_model_info(self) -> Dict[str, Any]:
-        return {"provider": "custom", "model": "custom-model"}
-    
-    async def health_check(self) -> bool:
-        # Check service availability
-        return True
+```
+app/
+  main.py                 # FastAPI app factory and wiring
+  celery_app.py           # Celery app setup (queues, beat, flower)
+  routers/
+    generation.py         # API endpoints
+  services/
+    celery_service.py     # Celery job service (wraps task submission/status)
+    celery_tasks.py       # Celery tasks (generation, enhanced, augmented)
+    job_store.py          # Unified job store abstraction over Celery
+    quality_service.py    # Quality filtering and scoring
+    data_augmentation_service.py
+    rate_limiting_service.py
+    prompt_service.py
+    generation_service.py
+  utils/
+    llm_client.py         # LLM client interface + implementations
+    token_utils.py        # Token and cost estimation
+  templates/              # Jinja2 templates
 ```
 
-2. **Register in factory**:
-
-```python
-def get_llm_client(provider: str = None) -> LLMClientInterface:
-    if provider == "custom":
-        return CustomLLMClient()
-    # ... existing providers
-```
-
-## 🧪 Testing
-
-Run the test suite:
+## Testing
 
 ```bash
-# Install test dependencies
-pip install pytest pytest-asyncio pytest-cov httpx
+# Install dev dependencies
+pip install -r requirements.txt
 
 # Run tests
 pytest
 
-# Run with coverage
+# With coverage
 pytest --cov=app tests/
-
-# Run specific test file
-pytest tests/test_generation.py
 ```
 
-Example test:
+The suite includes tests for API routes, `JobStore`, token utilities, rate limiting, augmentation, and quality filtering.
 
-```python
-import pytest
-from httpx import AsyncClient
-from app.main import app
+## Observability & Operations
 
-@pytest.mark.asyncio
-async def test_generate_endpoint():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.post("/api/generate", json={
-            "product": "test product",
-            "count": 1
-        })
-    assert response.status_code == 200
-    assert "job_id" in response.json()
-```
+- Flower dashboard at `http://localhost:5555` for Celery
+- Centralized logging to stdout (container-friendly)
+- Health endpoint at `/api/health`
 
-## 🚀 Production Deployment
+## Design Notes
 
-### Using Docker
+- `JobStore` abstracts job creation/status/cancel and defers to Celery
+- LLM client is pluggable; the Mock client is default-friendly for local dev
+- Quality filtering performs length checks, deduplication, and heuristic scoring; can be tuned via `QualityFilterConfig`
+- Rate limiter supports header parsing and token/request buckets
 
-```dockerfile
-FROM python:3.11-slim
+## Contributing
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+1. Create a feature branch: `git checkout -b feature/name`
+2. Make changes with tests
+3. Run `pytest`
+4. Open a PR
 
-COPY . .
+## License
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-### Using Gunicorn
-
-```bash
-pip install gunicorn
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
-
-### Environment Variables for Production
-
-```bash
-DEBUG=false
-REDIS_URL=redis://production-redis:6379/0
-OPENAI_API_KEY=prod_key_here
-MAX_CONCURRENT_JOBS=20
-LOG_LEVEL=info
-```
-
-## 🔧 Extensions
-
-### Adding Celery Queue
-
-Replace the built-in job manager with Celery for distributed processing:
-
-```python
-# celery_app.py
-from celery import Celery
-
-celery_app = Celery(
-    "dataforge",
-    broker="redis://localhost:6379/0",
-    backend="redis://localhost:6379/0"
-)
-
-@celery_app.task
-async def run_generation_task(request_data: dict, job_id: str):
-    # Move generation logic here
-    pass
-```
-
-### Adding Authentication
-
-```python
-# app/auth.py
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
-
-security = HTTPBearer()
-
-async def verify_token(token: str = Depends(security)):
-    # Implement token verification
-    if not valid_token(token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
-        )
-    return token
-
-# Use in routes
-@router.post("/generate", dependencies=[Depends(verify_token)])
-async def create_generation_job(...):
-    pass
-```
-
-### Adding Rate Limiting
-
-```python
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-@router.post("/generate")
-@limiter.limit("10/minute")
-async def create_generation_job(request: Request, ...):
-    pass
-```
-
-## 📊 Monitoring
-
-The API provides several monitoring endpoints:
-
-- `/api/health` - Service health status
-- `/api/stats` - System statistics
-- `/api/test-llm` - LLM connectivity test
-
-For production monitoring, integrate with:
-- **Prometheus** for metrics
-- **Grafana** for dashboards  
-- **Sentry** for error tracking
-- **ELK Stack** for log aggregation
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes with tests
-4. Run the test suite: `pytest`
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-- **Documentation**: Check the `/docs` endpoint when running in debug mode
-- **Issues**: Report bugs and feature requests via GitHub Issues
-- **Discussions**: Join the community discussions for questions and ideas
+MIT

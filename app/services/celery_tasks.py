@@ -16,7 +16,7 @@ from celery.exceptions import Retry
 from app.celery_app import celery_app
 from app.config import get_settings
 from app.models.schemas import GenerationRequest, GenerationResponse, GeneratedSample
-from app.services.generation_service import GenerationService
+# Avoid circular import: import GenerationService lazily inside task functions
 from app.utils.llm_client import get_llm_client, LLMException
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,8 @@ def run_generation_task(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
         # Convert dict back to Pydantic model
         request = GenerationRequest(**request_data)
         
-        # Create generation service
+        # Create generation service (lazy import to avoid circular import)
+        from app.services.generation_service import GenerationService
         service = GenerationService()
         
         # Progress callback for Celery state updates
@@ -118,7 +119,7 @@ def run_generation_task(self, request_data: Dict[str, Any]) -> Dict[str, Any]:
         
         return {
             'status': 'SUCCESS',
-            'result': result.dict(),
+            'result': result.model_dump(),
             'task_id': self.request.id,
             'completed_at': datetime.now(timezone.utc).isoformat()
         }
@@ -188,7 +189,8 @@ def run_enhanced_generation_task(self, enhanced_params: Dict[str, Any]) -> Dict[
             reset_quality_service()
             get_quality_service(quality_config)
         
-        # Initialize generation service
+        # Initialize generation service (lazy import to avoid circular import)
+        from app.services.generation_service import GenerationService
         service = GenerationService()
         
         # Progress callback for updates
@@ -250,7 +252,7 @@ def run_enhanced_generation_task(self, enhanced_params: Dict[str, Any]) -> Dict[
         
         return {
             'status': 'SUCCESS',
-            'result': result.dict(),
+            'result': result.model_dump(),
             'task_id': self.request.id,
             'completed_at': datetime.now(timezone.utc).isoformat(),
             'enhancement_features': {
@@ -329,7 +331,8 @@ def run_augmented_generation_task(
         # Convert dict back to Pydantic model
         request = GenerationRequest(**request_data)
         
-        # Create generation service
+        # Create generation service (lazy import to avoid circular import)
+        from app.services.generation_service import GenerationService
         service = GenerationService()
         
         # Progress callback
@@ -364,7 +367,7 @@ def run_augmented_generation_task(
         
         return {
             'status': 'SUCCESS',
-            'result': result.dict(),
+            'result': result.model_dump(),
             'task_id': self.request.id,
             'strategies_used': augmentation_strategies,
             'augment_ratio': augment_ratio,
@@ -446,6 +449,7 @@ def validate_generation_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         request = GenerationRequest(**request_data)
+        from app.services.generation_service import GenerationService
         service = GenerationService()
         
         # Run async validation

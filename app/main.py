@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 from app.config import get_settings, validate_settings
 from app.routers.generation import router as generation_router
-from app.services.job_manager import get_job_manager, cleanup_job_manager
+from app.services.job_store import get_job_store
 
 # Configure logging
 logging.basicConfig(
@@ -38,14 +38,14 @@ async def lifespan(app: FastAPI):
         # Validate configuration
         validate_settings()
         
-        # Initialize job manager (Redis connection)
-        job_manager = await get_job_manager()
-        logger.info("Job manager initialized successfully")
-        
-        # Clean up any expired jobs on startup
-        cleaned = await job_manager.cleanup_expired_jobs()
-        if cleaned > 0:
-            logger.info(f"Cleaned up {cleaned} expired jobs on startup")
+        # Initialize Celery job store (no-op but ensures Celery is reachable)
+        job_store = get_job_store()
+        # Optionally touch stats to ensure connectivity
+        try:
+            _ = job_store.get_stats()
+            logger.info("Job store available")
+        except Exception as e:
+            logger.warning(f"Job store stats unavailable: {e}")
         
         logger.info("DataForge API startup complete")
         
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     finally:
         # Cleanup on shutdown
         logger.info("Shutting down DataForge API...")
-        await cleanup_job_manager()
+        # No legacy job manager to clean up
         logger.info("DataForge API shutdown complete")
 
 

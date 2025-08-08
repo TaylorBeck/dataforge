@@ -29,25 +29,7 @@
 					},
 					"response": []
 				},
-				{
-					"name": "System Stats",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/stats",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"stats"
-							]
-						},
-						"description": "Get system statistics including active jobs, LLM provider info, and limits"
-					},
-					"response": []
-				},
+                
 				{
 					"name": "Root Endpoint",
 					"request": {

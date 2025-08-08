@@ -40,7 +40,7 @@ class CeleryJobService:
             logger.info(f"Creating Celery generation job for product: {request.product}")
             
             # Submit task to Celery
-            task = run_generation_task.delay(request.dict())
+            task = run_generation_task.delay(request.model_dump())
             
             logger.info(f"Created Celery generation job {task.id}")
             return task.id
@@ -77,7 +77,7 @@ class CeleryJobService:
             
             # Prepare enhanced parameters
             enhanced_params = {
-                "request": request.dict(),
+                "request": request.model_dump(),
                 "sentiment_intensity": sentiment_intensity,
                 "tone": tone,
                 "enable_few_shot": enable_few_shot,
@@ -120,7 +120,7 @@ class CeleryJobService:
             
             # Submit task to Celery
             task = run_augmented_generation_task.delay(
-                request.dict(),
+                request.model_dump(),
                 augmentation_strategies,
                 augment_ratio
             )
@@ -145,6 +145,9 @@ class CeleryJobService:
         try:
             # Get task result from Celery
             task = self.celery_app.AsyncResult(job_id)
+            # If Celery has no record beyond a default PENDING with no meta/result, treat as not found
+            if task.state == 'PENDING' and not task.info and not task.result:
+                return None
             
             # Map Celery states to our application states
             status_mapping = {
@@ -159,22 +162,38 @@ class CeleryJobService:
             
             status = status_mapping.get(task.state, 'unknown')
             
-            # Create base response
+            # Derive timestamps from task meta when available
+            created_at = None
+            updated_at = None
+            try:
+                meta = task.info if isinstance(task.info, dict) else {}
+                started_at = meta.get('started_at') if meta else None
+                completed_at = meta.get('completed_at') if meta else None
+                if started_at:
+                    created_at = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                if completed_at:
+                    updated_at = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+            except Exception:
+                created_at = None
+                updated_at = None
+
+            # Fallbacks if meta not available
+            now = datetime.now(timezone.utc)
             response = JobStatusResponse(
                 job_id=job_id,
                 status=status,
-                created_at=datetime.now(timezone.utc),  # Celery doesn't provide creation time easily
-                updated_at=datetime.now(timezone.utc)
+                created_at=created_at or now,
+                updated_at=updated_at or now
             )
             
             # Add progress information if available
             if task.state == 'PROGRESS' and task.info:
-                meta = task.info
+                meta = task.info if isinstance(task.info, dict) else {}
                 response.progress = meta.get('current', 0)
                 
             # Add results if completed successfully
             elif task.state == 'SUCCESS' and task.result:
-                result_data = task.result.get('result', {})
+                result_data = task.result.get('result', {}) if isinstance(task.result, dict) else {}
                 if result_data:
                     response.result = GenerationResponse(**result_data)
                     

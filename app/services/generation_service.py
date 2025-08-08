@@ -11,7 +11,8 @@ from app.models.schemas import GenerationRequest, GeneratedSample, GenerationRes
 from app.utils.llm_client import get_llm_client, LLMException
 from app.services.prompt_service import render_enhanced_prompt, get_default_template_context
 from app.services.quality_service import get_quality_service, QualityFilterConfig, QualityMetrics
-from app.services.job_manager import get_job_manager
+from app.services.job_store import get_job_store
+from app.utils.token_utils import estimate_request_cost
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,8 @@ class GenerationService:
             LLMException: On generation failure
         """
         try:
-            # Get LLM client
-            llm_client = get_llm_client()
+            # Get LLM client (reused per batch when available)
+            llm_client = getattr(self, "_llm_client", None) or get_llm_client()
             
             # Prepare template context
             context = get_default_template_context(request.product)
@@ -118,6 +119,9 @@ class GenerationService:
         logger.info(f"Starting batch generation: {request.count} samples for '{request.product}'")
         
         try:
+            # Create or reuse a single LLM client for the whole batch to reduce overhead
+            self._llm_client = get_llm_client()
+
             # Create generation tasks with enhanced features
             tasks = [
                 self.generate_single_sample(
@@ -214,6 +218,10 @@ class GenerationService:
         except Exception as e:
             logger.error(f"Batch generation failed: {e}")
             raise
+        finally:
+            # Ensure per-batch client is released
+            if hasattr(self, "_llm_client"):
+                delattr(self, "_llm_client")
     
     async def generate_with_job_tracking(
         self,
@@ -230,49 +238,28 @@ class GenerationService:
         Returns:
             Generation response
         """
-        job_manager = await get_job_manager()
+        # Use Celery task state for progress in workers; JobStore manages creation/cancellation
+        job_store = get_job_store()
         worker_id = f"worker-{uuid.uuid4().hex[:8]}"
         
         try:
             # Update job status to running
-            await job_manager.update_job_status(
-                job_id=job_id,
-                status="running",
-                progress=0,
-                worker_id=worker_id
-            )
+            # No-op for Celery pathway; progress is tracked in Celery task meta
             
             # Progress callback for job updates
             async def update_progress(progress: int):
-                await job_manager.update_job_status(
-                    job_id=job_id,
-                    status="running",
-                    progress=progress,
-                    worker_id=worker_id
-                )
+                # No-op; keep signature for compatibility if needed in future
+                return None
             
             # Generate samples
             result = await self.generate_batch(request, update_progress)
             
             # Store results and update status
-            await job_manager.store_job_result(job_id, result)
-            await job_manager.update_job_status(
-                job_id=job_id,
-                status="completed",
-                progress=100,
-                worker_id=worker_id
-            )
+            # In Celery flow, results are stored in backend and retrieved via JobStore
             
             return result
             
         except Exception as e:
-            # Update job status to error
-            await job_manager.update_job_status(
-                job_id=job_id,
-                status="error",
-                error_message=str(e),
-                worker_id=worker_id
-            )
             raise
     
     async def validate_generation_request(self, request: GenerationRequest) -> Dict[str, Any]:
@@ -300,13 +287,25 @@ class GenerationService:
                 results["errors"].append("LLM service unavailable")
                 results["valid"] = False
             
-            # Estimate cost (rough approximation for OpenAI)
+            # Estimate cost using tokenizer/pricing map if using OpenAI
             if self.settings.default_llm_provider == "openai":
-                # Assume ~100 tokens per sample for cost estimation
-                estimated_tokens = request.count * 100
-                # GPT-4 pricing (approximate): $0.03 per 1K tokens
-                estimated_cost = (estimated_tokens / 1000) * 0.03
-                results["estimated_cost"] = round(estimated_cost, 4)
+                # Build a representative prompt to estimate prompt tokens
+                context = get_default_template_context(request.product)
+                template_name = self.settings.default_prompt_template
+                prompt = render_enhanced_prompt(
+                    template_name=template_name,
+                    context=context,
+                    sentiment_intensity=None,
+                    tone=None,
+                    enable_few_shot=False,
+                    domain_constraints=[],
+                    min_length=50,
+                    max_length=200
+                )
+                expected_completion_tokens = min(self.settings.openai_max_tokens, 200)
+                _, est_cost = estimate_request_cost(prompt, expected_completion_tokens)
+                # Total cost roughly scales with count (upper bound)
+                results["estimated_cost"] = round(est_cost * request.count, 4)
             
             # Estimate duration (rough approximation)
             # Assume ~2 seconds per sample with concurrent execution
@@ -324,8 +323,8 @@ class GenerationService:
             if request.count > 20:
                 results["warnings"].append("Large requests may take several minutes to complete")
             
-            if estimated_cost > 1.0:
-                results["warnings"].append(f"Estimated cost: ${estimated_cost:.2f}")
+            if results.get("estimated_cost", 0.0) > 1.0:
+                results["warnings"].append(f"Estimated cost: ${results['estimated_cost']:.2f}")
             
         except Exception as e:
             logger.error(f"Validation failed: {e}")

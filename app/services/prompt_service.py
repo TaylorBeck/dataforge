@@ -149,15 +149,15 @@ class PromptTemplateService:
         }
         
         try:
+            from jinja2 import meta
             template = self.get_template(template_name, use_cache=False)
             
-            # Extract template variables
-            ast = self.env.parse(template.source)
-            variables = list(ast.find_all(self.env.nodes.Name))
-            var_names = list(set(var.name for var in variables if var.ctx == 'load'))
+            # Extract template variables using Jinja2 meta API
+            parsed_ast = self.env.parse(template.source)
+            var_names = sorted(list(meta.find_undeclared_variables(parsed_ast)))
             
             results["valid"] = True
-            results["variables"] = sorted(var_names)
+            results["variables"] = var_names
             
         except Exception as e:
             results["error"] = str(e)

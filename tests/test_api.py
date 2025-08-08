@@ -3,7 +3,7 @@ Basic tests for the DataForge API.
 """
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient
+import httpx
 from app.main import app
 from app.config import get_settings
 
@@ -20,7 +20,8 @@ def mock_settings():
 @pytest.mark.asyncio
 async def test_root_endpoint():
     """Test the root endpoint."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/")
     
     assert response.status_code == 200
@@ -32,7 +33,8 @@ async def test_root_endpoint():
 @pytest.mark.asyncio
 async def test_health_check():
     """Test the health check endpoint."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/api/health")
     
     assert response.status_code == 200
@@ -45,7 +47,8 @@ async def test_health_check():
 @pytest.mark.asyncio
 async def test_generate_endpoint():
     """Test the generation endpoint."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.post("/api/generate", json={
             "product": "test product",
             "count": 1,
@@ -65,7 +68,8 @@ async def test_generate_endpoint():
 @pytest.mark.asyncio
 async def test_validate_endpoint():
     """Test the validation endpoint."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.post("/api/validate", json={
             "product": "test product",
             "count": 5
@@ -78,19 +82,19 @@ async def test_validate_endpoint():
 
 
 @pytest.mark.asyncio
-async def test_stats_endpoint():
-    """Test the stats endpoint."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+async def test_stats_endpoint_removed():
+    """/api/stats was removed as part of deprecation; should return 404."""
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/api/stats")
-    
-    # Might fail without Redis, but structure should be correct
-    assert response.status_code in [200, 500]
+    assert response.status_code in [404, 405]
 
 
 @pytest.mark.asyncio
 async def test_invalid_generation_request():
     """Test validation of invalid generation requests."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         # Test empty product
         response = await ac.post("/api/generate", json={
             "product": "",
@@ -109,6 +113,7 @@ async def test_invalid_generation_request():
 @pytest.mark.asyncio 
 async def test_nonexistent_job():
     """Test getting status for nonexistent job."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/api/result/nonexistent-job-id")
         assert response.status_code == 404

@@ -113,11 +113,7 @@ class DataForgeClient:
             )
             return response.json()
     
-    async def get_stats(self) -> Dict[str, Any]:
-        """Get system statistics."""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.base_url}/api/stats")
-            return response.json()
+    # Deprecated: /api/stats was removed
 
 
 async def main():
@@ -129,12 +125,6 @@ async def main():
         health = await client.health_check()
         print(f"Health status: {health['status']}")
         print(f"Redis connected: {health['redis_connected']}")
-        print()
-        
-        print("📊 Getting system stats...")
-        stats = await client.get_stats()
-        print(f"Active jobs: {stats.get('jobs', {}).get('active_jobs', 0)}")
-        print(f"LLM provider: {stats.get('llm', {}).get('provider', 'unknown')}")
         print()
         
         # Example 1: Simple generation
@@ -206,9 +196,7 @@ async def main():
                 print(f"\n--- Sample {i} ---")
                 print(f"Text: {sample['text'][:150]}{'...' if len(sample['text']) > 150 else ''}")
         
-        print("\n📊 Final system stats...")
-        final_stats = await client.get_stats()
-        print(f"Total jobs created: {final_stats.get('jobs', {}).get('total_jobs_created', 0)}")
+        # Stats endpoint removed; no final stats to fetch
         
     except Exception as e:
         print(f"❌ Error: {e}")

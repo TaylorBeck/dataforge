@@ -7,11 +7,6 @@ from .prompt_service import (
     render_prompt,
     get_default_template_context
 )
-from .job_manager import (
-    JobManager,
-    get_job_manager,
-    cleanup_job_manager
-)
 from .generation_service import (
     GenerationService,
     get_generation_service,
@@ -23,9 +18,6 @@ __all__ = [
     "get_template_service",
     "render_prompt", 
     "get_default_template_context",
-    "JobManager",
-    "get_job_manager",
-    "cleanup_job_manager",
     "GenerationService",
     "get_generation_service",
     "run_generation_job"

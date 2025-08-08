@@ -46,3 +46,6 @@ types-redis>=4.6.0.11
 
 # LangChain compatibility (if using langchain packages)
 tenacity>=8.1.0,<9.0.0
+
+# GPT tokenizer, accurate tokenization for cost estimates
+tiktoken>=0.7.0

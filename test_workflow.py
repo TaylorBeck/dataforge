@@ -64,7 +64,7 @@ class WorkflowTester:
         self.print_section("System Statistics")
         
         try:
-            response = await self.client.get(f"{self.base_url}/api/stats")
+        # /api/stats removed
             
             if response.status_code == 200:
                 data = response.json()

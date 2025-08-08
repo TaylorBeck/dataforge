@@ -3,7 +3,9 @@ Pydantic models for request/response schemas and data validation.
 """
 from datetime import datetime
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
+from pydantic import field_validator
+from pydantic.config import ConfigDict
 
 
 class GenerationRequest(BaseModel):
@@ -34,8 +36,9 @@ class GenerationRequest(BaseModel):
         description="LLM sampling temperature (0.0-2.0)"
     )
     
-    @validator('product')
-    def sanitize_product(cls, v):
+    @field_validator('product')
+    @classmethod
+    def sanitize_product(cls, v: str) -> str:
         """Sanitize product string to prevent injection attacks."""
         if not v or not v.strip():
             raise ValueError('Product cannot be empty')
@@ -59,10 +62,7 @@ class GeneratedSample(BaseModel):
         description="Additional metadata including augmentation information"
     )
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
 
 
 class GenerationResponse(BaseModel):
@@ -71,6 +71,10 @@ class GenerationResponse(BaseModel):
     samples: List[GeneratedSample] = Field(..., description="List of generated samples")
     total_samples: int = Field(..., description="Total number of samples generated")
     total_tokens_estimated: int = Field(..., description="Total estimated tokens across all samples")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional metadata such as quality metrics, filter stats, augmentation info"
+    )
 
 
 class JobStatusResponse(BaseModel):
@@ -87,10 +91,7 @@ class JobStatusResponse(BaseModel):
     result: Optional[GenerationResponse] = Field(None, description="Generated samples if completed")
     progress: Optional[int] = Field(None, ge=0, le=100, description="Completion percentage (0-100)")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()
 
 
 class HealthCheckResponse(BaseModel):
@@ -101,7 +102,4 @@ class HealthCheckResponse(BaseModel):
     redis_connected: bool = Field(..., description="Redis connection status")
     version: str = Field(..., description="API version")
     
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    model_config = ConfigDict()

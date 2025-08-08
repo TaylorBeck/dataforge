@@ -97,7 +97,7 @@ class Settings(BaseSettings):
         description="OpenAI API key"
     )
     openai_model: str = Field(
-        "gpt-4", 
+        "gpt-4o", 
         description="OpenAI model to use"
     )
     openai_max_tokens: int = Field(
@@ -111,6 +111,15 @@ class Settings(BaseSettings):
         ge=5,
         le=300,
         description="OpenAI API timeout"
+    )
+    # Optional pricing overrides (USD per 1K tokens)
+    openai_prompt_rate_per_1k: float | None = Field(
+        default=None,
+        description="Override prompt token price per 1K tokens (USD)"
+    )
+    openai_completion_rate_per_1k: float | None = Field(
+        default=None,
+        description="Override completion token price per 1K tokens (USD)"
     )
     
     # Rate Limiting Configuration

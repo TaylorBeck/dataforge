@@ -279,7 +279,7 @@ MAX_CONCURRENT_JOBS=5
         instructions.append("📖 Once running, visit:")
         instructions.append("   • API docs: http://localhost:8000/docs")
         instructions.append("   • Health check: http://localhost:8000/api/health")
-        instructions.append("   • System stats: http://localhost:8000/api/stats")
+    # /api/stats removed
         instructions.append("")
         instructions.append("🧪 Test with the example script:")
         instructions.append("   python example_usage.py")

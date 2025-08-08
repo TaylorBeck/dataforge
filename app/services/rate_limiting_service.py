@@ -291,8 +291,9 @@ class RateLimitManager:
             refill_rate=tokens_per_minute / 60.0
         )
         
-        # Concurrency control
+        # Concurrency control and public active counter
         self.semaphore = asyncio.Semaphore(max_concurrent_requests)
+        self._active_requests: int = 0
         
         # Exponential backoff
         self.backoff = ExponentialBackoff()
@@ -405,69 +406,74 @@ class RateLimitManager:
         attempt = 0
         
         async with self.semaphore:  # Limit concurrent requests
-            while attempt < self.backoff.max_retries:
-                attempt += 1
-                self.metrics.total_requests += 1
-                
-                try:
-                    # Proactive rate limit check
-                    can_proceed, reason = await self.check_proactive_limits(estimated_tokens)
-                    if not can_proceed:
-                        logger.warning(f"Proactive rate limit block: {reason}")
-                        await self.backoff.sleep(attempt)
-                        continue
+            self._active_requests += 1
+            try:
+                while attempt < self.backoff.max_retries:
+                    attempt += 1
+                    self.metrics.total_requests += 1
                     
-                    # Wait for token bucket availability
-                    request_allowed = await self.request_bucket.consume(1)
-                    tokens_allowed = await self.token_bucket.consume(estimated_tokens)
-                    
-                    if not request_allowed:
-                        logger.warning("Request bucket rate limit reached")
-                        await self.backoff.sleep(attempt)
-                        continue
-                    
-                    if not tokens_allowed:
-                        logger.warning(f"Token bucket rate limit reached for {estimated_tokens} tokens")
-                        await self.backoff.sleep(attempt)
-                        continue
-                    
-                    # Track request timing
-                    self._request_times.append(time.time())
-                    self._token_usage.append(estimated_tokens)
-                    
-                    # Clean old tracking data (keep last 5 minutes)
-                    cutoff_time = time.time() - 300
-                    while self._request_times and self._request_times[0] < cutoff_time:
-                        self._request_times.popleft()
-                    while self._token_usage and len(self._token_usage) > len(self._request_times):
-                        self._token_usage.popleft()
-                    
-                    yield self
-                    
-                    # Success
-                    response_time = time.time() - start_time
-                    self.metrics.successful_requests += 1
-                    self.metrics.update_response_time(response_time)
-                    return
-                    
-                except RateLimitError as e:
-                    self.metrics.rate_limited_requests += 1
-                    logger.warning(f"Rate limit error on attempt {attempt}: {e}")
-                    
-                    if e.retry_after:
-                        await asyncio.sleep(e.retry_after)
-                    else:
-                        await self.backoff.sleep(attempt)
-                    
-                    if attempt < self.backoff.max_retries:
-                        self.metrics.retried_requests += 1
-                    
-                except Exception as e:
-                    logger.error(f"Unexpected error in rate limited request: {e}")
-                    raise
+                    try:
+                        # Proactive rate limit check
+                        can_proceed, reason = await self.check_proactive_limits(estimated_tokens)
+                        if not can_proceed:
+                            logger.warning(f"Proactive rate limit block: {reason}")
+                            await self.backoff.sleep(attempt)
+                            continue
+                        
+                        # Wait for token bucket availability
+                        request_allowed = await self.request_bucket.consume(1)
+                        tokens_allowed = await self.token_bucket.consume(estimated_tokens)
+                        
+                        if not request_allowed:
+                            logger.warning("Request bucket rate limit reached")
+                            await self.backoff.sleep(attempt)
+                            continue
+                        
+                        if not tokens_allowed:
+                            logger.warning(f"Token bucket rate limit reached for {estimated_tokens} tokens")
+                            await self.backoff.sleep(attempt)
+                            continue
+                        
+                        # Track request timing
+                        self._request_times.append(time.time())
+                        self._token_usage.append(estimated_tokens)
+                        
+                        # Clean old tracking data (keep last 5 minutes)
+                        cutoff_time = time.time() - 300
+                        while self._request_times and self._request_times[0] < cutoff_time:
+                            self._request_times.popleft()
+                        while self._token_usage and len(self._token_usage) > len(self._request_times):
+                            self._token_usage.popleft()
+                        
+                        yield self
+                        
+                        # Success
+                        response_time = time.time() - start_time
+                        self.metrics.successful_requests += 1
+                        self.metrics.update_response_time(response_time)
+                        return
+                        
+                    except RateLimitError as e:
+                        self.metrics.rate_limited_requests += 1
+                        logger.warning(f"Rate limit error on attempt {attempt}: {e}")
+                        
+                        if e.retry_after:
+                            await asyncio.sleep(e.retry_after)
+                        else:
+                            await self.backoff.sleep(attempt)
+                        
+                        if attempt < self.backoff.max_retries:
+                            self.metrics.retried_requests += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Unexpected error in rate limited request: {e}")
+                        raise
             
-            # All retries exhausted
-            raise RateLimitError(f"Max retries ({self.backoff.max_retries}) exceeded")
+                # All retries exhausted
+                raise RateLimitError(f"Max retries ({self.backoff.max_retries}) exceeded")
+            finally:
+                # Decrement active requests after leaving semaphore context
+                self._active_requests = max(0, self._active_requests - 1)
     
     def get_current_usage(self) -> Dict[str, Any]:
         """Get current rate limiting usage statistics"""
@@ -486,7 +492,7 @@ class RateLimitManager:
             'tokens_per_minute_limit': self.tokens_per_minute,
             'request_usage_percentage': (recent_requests / self.requests_per_minute) * 100,
             'token_usage_percentage': (recent_tokens / self.tokens_per_minute) * 100,
-            'concurrent_requests': self.max_concurrent_requests - self.semaphore._value,
+            'concurrent_requests': self._active_requests,
             'metrics': self.metrics
         }
 
